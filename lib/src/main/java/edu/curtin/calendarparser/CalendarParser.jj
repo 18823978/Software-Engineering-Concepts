@@ -1,0 +1,169 @@
+options {
+    BUILD_PARSER = true;
+    BUILD_TOKEN_MANAGER = true;
+}
+
+PARSER_BEGIN(CalendarParser)
+package edu.curtin.calendarparser;
+import java.io.*;
+import edu.curtin.event.Event;
+import edu.curtin.event.EventStorage;
+import edu.curtin.plugin.PluginClass;
+import edu.curtin.plugin.PluginStorage;
+import edu.curtin.script.ScriptClass;
+import edu.curtin.script.ScriptStorage;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.HashMap;
+import java.nio.charset.Charset;
+
+public class CalendarParser 
+{
+    public static void parse(String fileName, Charset encoding) throws ParseException, IOException
+    {
+        FileInputStream fileInputStream = new FileInputStream(fileName);
+        InputStreamReader inputStreamReader = new InputStreamReader(fileInputStream, encoding);
+        CalendarParser parser = new CalendarParser(fileInputStream);
+        parser.start();
+    }
+}
+PARSER_END(CalendarParser)
+
+SKIP:{" " | "\n" | "\r" | "\t" }
+
+TOKEN : 
+{
+    < EVENT_DECLARATION: "event" > |
+    < PLUGIN_DECLARATION: "plugin" > |
+    < SCRIPT_DECLARATION: "script" > |
+
+    < DATE: (["0"-"9"])+ "-" (["0"-"9"])+ "-" (["0"-"9"])+ > |
+    < TIME: (["0"-"9"])+ ":" (["0"-"9"])+ ":" (["0"-"9"])+ > |
+    < DURATION: (["0"-"9"])+ > |
+    < ALL_DAY: "all-day" >  |
+
+    < STRING_QUOTE: "\"" (~["\""])* "\"" > |
+    < SCRIPT_CONTENT: "\"" (~["\""] | "\"\"")* "\"" > |
+    < STRING_NORMAL: (~[" ", "\n", "\r", "{", "}", ":", ","])+ >
+}
+
+void start() : {}
+{
+    (event() | plugin() | script())*
+}
+
+void event() : 
+{
+    Token date, startTime, duration, title, tokAllDay;
+    LocalDate eventDate;
+    LocalTime eventTime = null;
+    int eventDuration = 0;
+    String eventTitle;
+    boolean allDay = false;
+    EventStorage storage = EventStorage.getInstance();
+}
+{
+    (
+        < EVENT_DECLARATION > date = <DATE>
+        {
+            eventDate = LocalDate.parse(date.image);
+        }
+        (
+            startTime = <TIME>
+            {
+                eventTime = LocalTime.parse(startTime.image);
+            }
+            duration = <DURATION>
+            {
+                eventDuration = Integer.parseInt(duration.image);
+            }
+            |
+            tokAllDay = <ALL_DAY>
+            {
+                allDay = true;
+            }
+        )
+        title = <STRING_QUOTE>
+        {
+            eventTitle = title.image;
+        }
+        {
+            if(allDay)
+            {
+                Event newEvent = new Event(eventDate, allDay, eventTitle);
+                storage.addEvent(newEvent);
+            }
+            else
+            {
+                Event newEvent = new Event(eventDate, eventTime, eventDuration, eventTitle);
+                storage.addEvent(newEvent);
+            }
+        }
+    )
+}
+
+void plugin() : 
+{
+    Token plugin_id, arguments, key, value;
+    PluginStorage storage = PluginStorage.getInstance();
+    String plugID;
+    HashMap<String, String> pluginKeyValues = new HashMap<String, String>();
+}
+{
+    (
+        < PLUGIN_DECLARATION > plugin_id = < STRING_NORMAL >
+        {
+            plugID = plugin_id.image;
+        }
+        {
+            pluginKeyValues.clear();
+        }
+        (
+            "{" getKeys(pluginKeyValues) ("," getKeys(pluginKeyValues))* "}"
+        )
+        {
+            PluginClass newPlug = new PluginClass(plugID, pluginKeyValues);
+            storage.addPlugin(newPlug);
+        }
+    )
+}
+
+void getKeys(HashMap<String, String> plugMap):
+{
+    Token key, value;
+    String plugKey;
+    String plugValue;
+}
+{
+    key = <STRING_NORMAL> ":" value = <STRING_QUOTE>
+    {
+        plugKey = key.image;
+        plugValue = value.image;
+        plugMap.put(plugKey, plugValue);
+    }
+}
+
+void script() : 
+{
+    Token script;
+    String scriptContent;
+    ScriptStorage storage = ScriptStorage.getInstance();
+}
+{
+    < SCRIPT_DECLARATION > getContent() (getContent())*
+}
+
+void getContent() :
+{
+    Token script;
+    String scriptContent;
+    ScriptStorage storage = ScriptStorage.getInstance();
+}
+{
+    script = < SCRIPT_CONTENT > 
+    {
+        scriptContent = script.image;
+        ScriptClass newScript = new ScriptClass(scriptContent);
+        storage.addScript(newScript);
+    }
+}
